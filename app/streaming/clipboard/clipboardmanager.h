@@ -5,13 +5,15 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QTimer>
+#include <QSslCertificate>
 
 class ClipboardManager : public QObject
 {
     Q_OBJECT
 
 public:
-    explicit ClipboardManager(const QString& hostAddress, int httpPort,
+    explicit ClipboardManager(const QString& hostAddress, int httpsPort,
+                              const QSslCertificate& serverCert,
                               const QString& uniqueId, QObject* parent = nullptr);
     ~ClipboardManager();
 
@@ -33,7 +35,8 @@ private:
     QNetworkAccessManager* m_NetworkManager;
     QTimer* m_PollTimer;
     QString m_HostAddress;
-    int m_HttpPort;
+    int m_HttpsPort;
+    QSslCertificate m_ServerCert;
     QString m_UniqueId;
     QString m_LastKnownRemoteContent;
     bool m_UpdatingClipboard;

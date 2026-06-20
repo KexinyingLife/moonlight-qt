@@ -1943,6 +1943,7 @@ void Session::exec()
             httpsPort = 47984; // Default Apollo/Sunshine HTTPS port
         }
         m_ClipboardManager = new ClipboardManager(hostAddress, httpsPort,
+                                                   m_Computer->serverCert,
                                                    m_Computer->uuid, this);
         m_ClipboardManager->start();
     }

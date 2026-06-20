@@ -1,21 +1,26 @@
 #include "clipboardmanager.h"
+#include "backend/identitymanager.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QNetworkRequest>
 #include <QSslConfiguration>
+#include <QUuid>
+#include <QUrlQuery>
 
 #include <SDL.h>
 
 ClipboardManager::ClipboardManager(const QString& hostAddress, int httpsPort,
+                                   const QSslCertificate& serverCert,
                                    const QString& uniqueId, QObject* parent)
     : QObject(parent),
       m_Clipboard(nullptr),
       m_NetworkManager(nullptr),
       m_PollTimer(nullptr),
       m_HostAddress(hostAddress),
-      m_HttpPort(httpsPort),
+      m_HttpsPort(httpsPort),
+      m_ServerCert(serverCert),
       m_UniqueId(uniqueId),
       m_UpdatingClipboard(false),
       m_Started(false)
@@ -37,7 +42,7 @@ void ClipboardManager::start()
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Clipboard sync started for %s:%d",
                 m_HostAddress.toLocal8Bit().constData(),
-                m_HttpPort);
+                m_HttpsPort);
 
     m_Clipboard = QGuiApplication::clipboard();
     m_NetworkManager = new QNetworkAccessManager(this);
@@ -115,16 +120,31 @@ QNetworkRequest ClipboardManager::createRequest(const QString& path)
 {
     QUrl url(QString("https://%1:%2%3")
              .arg(m_HostAddress)
-             .arg(m_HttpPort)
+             .arg(m_HttpsPort)
              .arg(path));
 
-    QNetworkRequest request(url);
-    request.setTransferTimeout(3000);
+    // Add required query parameters
+    QUrlQuery query;
+    query.addQueryItem("type", "text");
+    url.setQuery(query);
 
-    // Apollo uses self-signed certificates, so we need to ignore SSL errors
-    QSslConfiguration sslConfig = request.sslConfiguration();
-    sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+    QNetworkRequest request(url);
+
+    // Configure SSL with client certificate for mTLS authentication
+    QSslConfiguration sslConfig = IdentityManager::get()->getSslConfig();
+
+    // Accept self-signed server certificates (Apollo default)
+    sslConfig.setPeerVerifyMode(QSslSocket::QueryPeer);
+    sslConfig.addCaCertificate(m_ServerCert);
+
     request.setSslConfiguration(sslConfig);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Disable HTTP/2
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+#endif
+
+    request.setTransferTimeout(3000);
 
     return request;
 }
@@ -134,6 +154,13 @@ void ClipboardManager::fetchRemoteClipboard()
     QNetworkRequest request = createRequest("/actions/clipboard");
 
     QNetworkReply* reply = m_NetworkManager->get(request);
+
+    // Handle SSL errors by ignoring them (self-signed certs)
+    connect(reply, &QNetworkReply::sslErrors, this, [reply](const QList<QSslError>& errors) {
+        Q_UNUSED(errors);
+        reply->ignoreSslErrors();
+    });
+
     connect(reply, &QNetworkReply::finished,
             this, [this, reply]() { onClipboardFetchComplete(reply); });
 }
@@ -144,6 +171,13 @@ void ClipboardManager::setRemoteClipboard(const QString& content)
     request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain");
 
     QNetworkReply* reply = m_NetworkManager->post(request, content.toUtf8());
+
+    // Handle SSL errors by ignoring them (self-signed certs)
+    connect(reply, &QNetworkReply::sslErrors, this, [reply](const QList<QSslError>& errors) {
+        Q_UNUSED(errors);
+        reply->ignoreSslErrors();
+    });
+
     connect(reply, &QNetworkReply::finished,
             this, [this, reply]() { onClipboardSetComplete(reply); });
 }
@@ -153,7 +187,11 @@ void ClipboardManager::onClipboardFetchComplete(QNetworkReply* reply)
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
-        // Silently ignore fetch errors (server may not support clipboard API)
+        // Silently ignore fetch errors (server may not support clipboard API
+        // or client may not have clipboard permission)
+        SDL_LogVerbose(SDL_LOG_CATEGORY_APPLICATION,
+                       "Clipboard fetch error: %s",
+                       reply->errorString().toLocal8Bit().constData());
         return;
     }
 
