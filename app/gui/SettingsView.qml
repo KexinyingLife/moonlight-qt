@@ -1751,6 +1751,24 @@ Flickable {
                                   qsTr("You can toggle it at any time while streaming using Ctrl+Alt+Shift+S or Select+L1+R1+X.") + "\n\n" +
                                   qsTr("The performance overlay is not supported on Steam Link or Raspberry Pi.")
                 }
+
+                CheckBox {
+                    id: enableClipboardSync
+                    width: parent.width
+                    text: qsTr("Enable clipboard sync with host (Apollo)")
+                    font.pointSize: 12
+                    checked: StreamingPreferences.enableClipboardSync
+                    onCheckedChanged: {
+                        StreamingPreferences.enableClipboardSync = checked
+                    }
+
+                    ToolTip.delay: 1000
+                    ToolTip.timeout: 5000
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Synchronize clipboard content bidirectionally between this device and the host PC.") + "\n\n" +
+                                  qsTr("Requires Apollo (Sunshine fork) as the host software with clipboard support enabled.") + "\n\n" +
+                                  qsTr("Clipboard data is transmitted over the encrypted streaming connection.")
+                }
             }
         }
     }

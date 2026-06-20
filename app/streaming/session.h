@@ -10,6 +10,7 @@
 #include "video/decoder.h"
 #include "audio/renderers/renderer.h"
 #include "video/overlaymanager.h"
+#include "clipboard/clipboardmanager.h"
 
 class SupportedVideoFormatList : public QList<int>
 {
@@ -263,6 +264,7 @@ private:
     int m_FlushingWindowEventsRef;
     QStringList m_LaunchWarnings;
     bool m_ShouldExit;
+    ClipboardManager* m_ClipboardManager;
 
     bool m_AsyncConnectionSuccess;
     int m_PortTestResults;

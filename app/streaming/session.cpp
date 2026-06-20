@@ -562,6 +562,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences *prefere
       m_MouseEmulationRefCount(0),
       m_FlushingWindowEventsRef(0),
       m_ShouldExit(false),
+      m_ClipboardManager(nullptr),
       m_AsyncConnectionSuccess(false),
       m_PortTestResults(0),
       m_OpusDecoder(nullptr),
@@ -1934,6 +1935,18 @@ void Session::exec()
     // (m_UnexpectedTermination is set back to true).
     m_UnexpectedTermination = false;
 
+    // Start clipboard sync if enabled
+    if (m_Preferences->enableClipboardSync) {
+        QString hostAddress = m_Computer->activeAddress.address();
+        uint16_t httpsPort = m_Computer->activeHttpsPort;
+        if (httpsPort == 0) {
+            httpsPort = 47984; // Default Apollo/Sunshine HTTPS port
+        }
+        m_ClipboardManager = new ClipboardManager(hostAddress, httpsPort,
+                                                   m_Computer->uuid, this);
+        m_ClipboardManager->start();
+    }
+
     // Start rich presence to indicate we're in game
     RichPresenceManager presence(*m_Preferences, m_App.name);
 
@@ -2290,6 +2303,13 @@ void Session::exec()
     }
 
 DispatchDeferredCleanup:
+    // Stop clipboard sync before cleanup
+    if (m_ClipboardManager) {
+        m_ClipboardManager->stop();
+        delete m_ClipboardManager;
+        m_ClipboardManager = nullptr;
+    }
+
     // Switch back to synchronous logging mode
     StreamUtils::exitAsyncLoggingMode();
 
