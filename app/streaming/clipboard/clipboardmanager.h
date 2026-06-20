@@ -28,6 +28,7 @@ private slots:
 
 private:
     QNetworkRequest createRequest(const QString& path);
+    void checkLocalClipboard();
     void fetchRemoteClipboard();
     void setRemoteClipboard(const QString& content);
 
@@ -39,6 +40,7 @@ private:
     QSslCertificate m_ServerCert;
     QString m_UniqueId;
     QString m_LastKnownRemoteContent;
+    QString m_LastSentLocalContent;
     bool m_UpdatingClipboard;
     bool m_Started;
 };

@@ -40,7 +40,7 @@ void ClipboardManager::start()
     m_Started = true;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Clipboard sync started for %s:%d",
+                "[Clipboard] Sync started for %s:%d",
                 m_HostAddress.toLocal8Bit().constData(),
                 m_HttpsPort);
 
@@ -51,7 +51,8 @@ void ClipboardManager::start()
     connect(m_Clipboard, &QClipboard::dataChanged,
             this, &ClipboardManager::onLocalClipboardChanged);
 
-    // Set up polling timer for remote clipboard changes
+    // Set up polling timer for both remote clipboard changes
+    // and local clipboard monitoring (as fallback on macOS)
     m_PollTimer = new QTimer(this);
     connect(m_PollTimer, &QTimer::timeout,
             this, &ClipboardManager::onPollTimerExpired);
@@ -66,7 +67,7 @@ void ClipboardManager::stop()
     m_Started = false;
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Clipboard sync stopped");
+                "[Clipboard] Sync stopped");
 
     if (m_PollTimer) {
         m_PollTimer->stop();
@@ -86,7 +87,63 @@ void ClipboardManager::onLocalClipboardChanged()
         return;
     }
 
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "[Clipboard] Local clipboard changed signal received");
+
     // Only sync text clipboard
+    if (!m_Clipboard->mimeData()->hasText()) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "[Clipboard] No text in clipboard, ignoring");
+        return;
+    }
+
+    QString text = m_Clipboard->text();
+    if (text.isEmpty()) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "[Clipboard] Clipboard text is empty, ignoring");
+        return;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "[Clipboard] Local text: '%s' (len=%d, lastRemote='%s', len=%d)",
+                text.left(50).toLocal8Bit().constData(),
+                text.length(),
+                m_LastKnownRemoteContent.left(50).toLocal8Bit().constData(),
+                m_LastKnownRemoteContent.length());
+
+    // Don't send if it matches what we last received from the host
+    if (text == m_LastKnownRemoteContent) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "[Clipboard] Skipping - matches last remote content");
+        return;
+    }
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "[Clipboard] Syncing to host (%d chars)",
+                text.length());
+
+    setRemoteClipboard(text);
+}
+
+void ClipboardManager::onPollTimerExpired()
+{
+    if (!m_Started) {
+        return;
+    }
+
+    // On macOS, also check local clipboard periodically as fallback
+    // because dataChanged signal may not fire reliably
+    checkLocalClipboard();
+
+    fetchRemoteClipboard();
+}
+
+void ClipboardManager::checkLocalClipboard()
+{
+    if (m_UpdatingClipboard || !m_Clipboard) {
+        return;
+    }
+
     if (!m_Clipboard->mimeData()->hasText()) {
         return;
     }
@@ -101,19 +158,17 @@ void ClipboardManager::onLocalClipboardChanged()
         return;
     }
 
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Local clipboard changed, syncing to host (%d chars)",
-                text.length());
-
-    setRemoteClipboard(text);
-}
-
-void ClipboardManager::onPollTimerExpired()
-{
-    if (!m_Started) {
+    // Don't send if it matches what we already sent
+    if (text == m_LastSentLocalContent) {
         return;
     }
-    fetchRemoteClipboard();
+
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "[Clipboard] Poll detected local change, syncing to host (%d chars)",
+                text.length());
+
+    m_LastSentLocalContent = text;
+    setRemoteClipboard(text);
 }
 
 QNetworkRequest ClipboardManager::createRequest(const QString& path)
@@ -170,6 +225,11 @@ void ClipboardManager::setRemoteClipboard(const QString& content)
     QNetworkRequest request = createRequest("/actions/clipboard");
     request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain");
 
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                "[Clipboard] Sending POST to host: '%s' (%d chars)",
+                content.left(50).toLocal8Bit().constData(),
+                content.length());
+
     QNetworkReply* reply = m_NetworkManager->post(request, content.toUtf8());
 
     // Handle SSL errors by ignoring them (self-signed certs)
@@ -189,9 +249,6 @@ void ClipboardManager::onClipboardFetchComplete(QNetworkReply* reply)
     if (reply->error() != QNetworkReply::NoError) {
         // Silently ignore fetch errors (server may not support clipboard API
         // or client may not have clipboard permission)
-        SDL_LogVerbose(SDL_LOG_CATEGORY_APPLICATION,
-                       "Clipboard fetch error: %s",
-                       reply->errorString().toLocal8Bit().constData());
         return;
     }
 
@@ -213,10 +270,11 @@ void ClipboardManager::onClipboardFetchComplete(QNetworkReply* reply)
     }
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Remote clipboard changed, syncing to local (%d chars)",
+                "[Clipboard] Remote clipboard changed, syncing to local (%d chars)",
                 remoteText.length());
 
     m_LastKnownRemoteContent = remoteText;
+    m_LastSentLocalContent = remoteText; // Also update to prevent echo
 
     // Set local clipboard without triggering our change handler
     m_UpdatingClipboard = true;
@@ -232,7 +290,11 @@ void ClipboardManager::onClipboardSetComplete(QNetworkReply* reply)
 
     if (reply->error() != QNetworkReply::NoError) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Failed to set remote clipboard: %s",
-                    reply->errorString().toLocal8Bit().constData());
+                    "[Clipboard] Failed to set remote clipboard: %s (HTTP %d)",
+                    reply->errorString().toLocal8Bit().constData(),
+                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt());
+    } else {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "[Clipboard] Successfully set remote clipboard");
     }
 }
