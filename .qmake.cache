@@ -1,3 +1,0 @@
-QMAKE_TARGET_BUNDLE_PREFIX = liuying
-CONFIG += done_config_SL
-CONFIG += done_config_EGL

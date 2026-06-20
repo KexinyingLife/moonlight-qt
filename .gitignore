@@ -1,9 +1,30 @@
 *pro.user
 
-
 **/.vs/
 .vscode/
 build/
 libs/
 config.tests/*/.qmake.stash
 config.tests/*/Makefile
+
+# Build artifacts
+*.o
+*.a
+*.dylib
+*.dmg
+*.app/
+Makefile
+Makefile.Debug
+Makefile.Release
+.qmake.cache
+.qmake.stash
+config.log
+moc_*.cpp
+moc_predefs.h
+qml_qmlcache.qrc
+release/
+debug/
+
+# macOS
+.DS_Store
+app/Info.plist-e
