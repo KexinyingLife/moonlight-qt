@@ -1,0 +1,87 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install create-dmg
+        run: |
+          brew install node
+          npm install --global create-dmg
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: mac
+          target: desktop
+          arch: clang_64
+          set-env: true
+          add-tools-to-path: true
+
+      - name: Install dependencies
+        run: python3 setup-deps.py
+
+      - name: Build
+        run: |
+          bash scripts/generate-dmg.sh Release
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moonlight-macOS-ClipboardSync
+          path: build/installer-Release/*.dmg
+          compression-level: 0
+
+  create-release:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+    permissions:
+      contents: write
+    steps:
+      - name: Download DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: Moonlight-macOS-ClipboardSync
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.0-clipboard-sync
+          name: Moonlight with Clipboard Sync (Apollo)
+          body: |
+            ## Moonlight with Clipboard Sync for Apollo
+
+            This is a custom build of Moonlight that supports bidirectional clipboard synchronization with Apollo (Sunshine fork) servers.
+
+            ### Features
+            - Bidirectional clipboard sync between client and host
+            - Settings toggle in Advanced Settings
+            - Compatible with Apollo's `/actions/clipboard` API
+            - macOS ARM64 (Apple Silicon) native build
+
+            ### Requirements
+            - Apollo (Sunshine fork) as the host server
+            - Clipboard support enabled on the Apollo server
+
+            ### Usage
+            1. Install and open Moonlight
+            2. Go to Settings → Advanced Settings
+            3. Enable "Clipboard sync with host (Apollo)"
+            4. Connect to your Apollo server
+            5. Clipboard content will sync automatically
+          files: '*.dmg'
+          draft: false
+          prerelease: false
